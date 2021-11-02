@@ -1,54 +1,65 @@
-use std::io;
+use anyhow::{anyhow, Result};
 use std::fs;
-use std::path::Path;
-use clap::{Arg, App, ArgMatches};
+use std::path::PathBuf;
+use structopt::StructOpt;
 
-fn get_args() -> ArgMatches<'static> {
-    App::new("House")
-        .version("0.1")
-        .arg(Arg::with_name("silent")
-            .short("s")
-            .long("silent")
-            .takes_value(false))
-        .arg(Arg::with_name("dry-run")
-            .short("d")
-            .long("dry-run")
-            .takes_value(false))
-        .arg(Arg::with_name("path")
-            .required(true))
-        .get_matches()
+#[derive(Clone, PartialEq, Debug, StructOpt)]
+#[structopt(name = "house", version = "0.1")]
+struct Opt {
+    #[structopt(short, long)]
+    silent: bool,
+    #[structopt(short, long)]
+    dry_run: bool,
+    path: PathBuf,
 }
 
-fn find_dir<'a, P: AsRef<Path>>(file: &P, dirs: &'a Vec<P>) -> Option<&'a P> {
-    let file_name = file.as_ref().file_name().unwrap().to_string_lossy();
-    dirs.iter().find(|&p| {
-        let dir_name = p.as_ref().file_name().unwrap().to_string_lossy();
-        file_name.contains(&*dir_name)
-    })
-}
+fn find_dir<'a>(file: &PathBuf, dirs: &'a Vec<PathBuf>) -> Result<Option<&'a PathBuf>> {
+    let file_name = file
+        .file_name()
+        .ok_or_else(|| anyhow!("failed to get filename: from {:?}", file))?
+        .to_string_lossy();
 
-fn rename<P: AsRef<Path>>(from: &P, dest: &P, matches: &ArgMatches) {
-    let (from, dest) = (from.as_ref(), dest.as_ref());
-    let to = dest.join(from.file_name().unwrap());
-
-    if !matches.is_present("dry-run") {
-        fs::rename(&from, &to).unwrap();
+    for dir in dirs {
+        if let Some(dir_name) = dir.file_name() {
+            if file_name.contains(&*dir_name.to_string_lossy()) {
+                return Ok(Some(dir))
+            }
+        }
     }
-    if !matches.is_present("silent") {
-        println!("from: {:?}", &from.file_name().unwrap());
-        println!("to  : {:?}", &dest.file_name().unwrap());
+
+    Ok(None)
+}
+
+fn rename(from: &PathBuf, dest: &PathBuf, opt: &Opt) -> Result<()> {
+    let from_name = from
+        .file_name()
+        .ok_or_else(|| anyhow!("failed to get file_name: from: {:?}", from))?;
+
+    let dest_name = dest
+        .file_name()
+        .ok_or_else(|| anyhow!("failed to get file_name: dest: {:?}", dest))?;
+
+    if !opt.dry_run {
+        let to = dest.join(from_name);
+        fs::rename(&from, &to)?;
+    }
+
+    if !opt.silent {
+        println!("from: {:?}", &from_name);
+        println!("to  : {:?}", &dest_name);
         println!();
     }
+
+    Ok(())
 }
 
-fn main() -> io::Result<()> {
-    let matches = get_args();
-    let path = matches.value_of("path").expect("path is not provided");
+fn main() -> Result<()> {
+    let opt = Opt::from_args();
 
     let mut files = vec![];
     let mut dirs = vec![];
 
-    if let Ok(entries) = fs::read_dir(path) {
+    if let Ok(entries) = fs::read_dir(&opt.path) {
         for entry in entries {
             let entry = entry?;
             let typ = entry.file_type()?;
@@ -62,11 +73,12 @@ fn main() -> io::Result<()> {
     }
 
     for from in files {
-        if let Some(dest) = find_dir(&from, &dirs) {
-            rename(&from, &dest, &matches);
+        if let Ok(Some(dest)) = find_dir(&from, &dirs) {
+            if let Err(err) = rename(&from, &dest, &opt) {
+                println!("{}", err);
+            }
         }
     }
 
     Ok(())
 }
-
