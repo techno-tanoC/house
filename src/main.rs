@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use structopt::StructOpt;
 
 #[derive(Clone, PartialEq, Debug, StructOpt)]
-#[structopt(name = "house", version = "0.1")]
+#[structopt(name = "house", version = "0.1.1")]
 struct Opt {
     #[structopt(short, long)]
     silent: bool,
